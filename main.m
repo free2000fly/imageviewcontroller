@@ -1,6 +1,6 @@
 //
 //  main.m
-//  VIPhotoViewDemo
+//  RichPhotoViewDemo
 //
 //  Created by Vito on 1/7/15.
 //  Copyright (c) 2015 vito. All rights reserved.

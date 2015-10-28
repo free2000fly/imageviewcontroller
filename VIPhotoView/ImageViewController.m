@@ -1,5 +1,5 @@
 //
-//  VIPhotoView.m
+//  ImageViewController.m
 //
 
 #import "ImageViewController.h"
@@ -255,7 +255,7 @@ static const CGFloat __blurSaturationDeltaMask = 0.8f;
 static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint the background view
 
 
-@interface VIPhotoView () <UIScrollViewDelegate, UIGestureRecognizerDelegate, UIDynamicAnimatorDelegate>
+@interface RichPhotoView () <UIScrollViewDelegate, UIGestureRecognizerDelegate, UIDynamicAnimatorDelegate>
 
 @property (nonatomic, strong) UIView *containerView;
 @property (nonatomic, strong) UIImageView *imageView;
@@ -265,7 +265,7 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
 
 @end
 
-@implementation VIPhotoView {
+@implementation RichPhotoView {
     UIPanGestureRecognizer *_panRecognizer;
     BOOL _doubleTap;
     UIDynamicAnimator *_animator;
@@ -625,7 +625,7 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
 
 
 @implementation ImageViewController {
-    VIPhotoView *_photoView;
+    RichPhotoView *_photoView;
 
     __weak UIView *_keyWindow;
 
@@ -677,7 +677,7 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
     _image = image;
 
     CGRect rc = self.view.bounds;
-    VIPhotoView *photoView = [[VIPhotoView alloc] initWithFrame:rc andImage:image];
+    RichPhotoView *photoView = [[RichPhotoView alloc] initWithFrame:rc andImage:image];
     photoView.autoresizingMask = (1 << 6) -1;
     photoView.parentController = self;
 

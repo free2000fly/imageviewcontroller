@@ -4,7 +4,7 @@
 
 #import <UIKit/UIKit.h>
 
-@interface VIPhotoView : UIScrollView
+@interface RichPhotoView : UIScrollView
 @property(nonatomic, weak) UIViewController *parentController;
 @property(nonatomic, strong) dispatch_block_t returnBlock;
 - (instancetype)initWithFrame:(CGRect)frame andImage:(UIImage *)image;
