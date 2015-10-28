@@ -8,6 +8,38 @@
 
 #import "VIPhotoView.h"
 
+@implementation ImageController {
+    __weak VIPhotoView *_photoView;
+}
+
+- (BOOL)prefersStatusBarHidden {
+    return YES;
+}
+
+- (void) setImage:(UIImage *)image {
+    _image = image;
+
+    VIPhotoView *photoView = [[VIPhotoView alloc] initWithFrame:self.view.bounds andImage:image];
+    photoView.autoresizingMask = (1 << 6) -1;
+    photoView.parentController = self;
+
+    self.view = photoView;
+    _photoView = photoView;
+    if (_returnBlock) {
+        _photoView.returnBlock = _returnBlock;
+    }
+}
+
+- (void) setReturnBlock:(dispatch_block_t)returnBlock {
+    _returnBlock = returnBlock;
+    if (_photoView) {
+        _photoView.returnBlock = returnBlock;
+    }
+}
+
+@end
+
+
 @interface UIImage (VIUtil)
 - (CGSize)sizeThatFits:(CGSize)size;
 @end
@@ -36,13 +68,27 @@
 }
 @end
 
-@interface VIPhotoView () <UIScrollViewDelegate, UIGestureRecognizerDelegate>
+
+static const CGFloat __overlayAlpha = 0.6f;						// opacity of the black overlay displayed below the focused image
+static const CGFloat __animationDuration = 0.18f;				// the base duration for present/dismiss animations (except physics-related ones)
+static const CGFloat __maximumDismissDelay = 0.5f;				// maximum time of delay (in seconds) between when image view is push out and dismissal animations begin
+static const CGFloat __resistance = 0.0f;						// linear resistance applied to the image’s dynamic item behavior
+static const CGFloat __density = 1.0f;							// relative mass density applied to the image's dynamic item behavior
+static const CGFloat __velocityFactor = 1.0f;					// affects how quickly the view is pushed out of the view
+static const CGFloat __angularVelocityFactor = 1.0f;			// adjusts the amount of spin applied to the view during a push force, increases towards the view bounds
+static const CGFloat __minimumVelocityRequiredForPush = 50.0f;	// defines how much velocity is required for the push behavior to be applied
+
+/* parallax options */
+static const CGFloat __backgroundScale = 0.9f;					// defines how much the background view should be scaled
+static const CGFloat __blurRadius = 2.0f;						// defines how much the background view is blurred
+static const CGFloat __blurSaturationDeltaMask = 0.8f;
+static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint the background view
+
+
+@interface VIPhotoView () <UIScrollViewDelegate, UIGestureRecognizerDelegate, UIDynamicAnimatorDelegate>
 
 @property (nonatomic, strong) UIView *containerView;
 @property (nonatomic, strong) UIImageView *imageView;
-
-@property (nonatomic, strong) UIDynamicAnimator *animator;
-
 
 @property (nonatomic) BOOL rotating;
 @property (nonatomic) CGSize minSize;
@@ -52,6 +98,13 @@
 @implementation VIPhotoView {
     UIPanGestureRecognizer *_panRecognizer;
     BOOL _doubleTap;
+    UIDynamicAnimator *_animator;
+    UISnapBehavior *_snapBehavior;
+    UIPushBehavior *_pushBehavior;
+    UIAttachmentBehavior *_panAttachmentBehavior;
+    UIDynamicItemBehavior *_itemBehavior;
+
+    CGFloat _lastZoomScale;
 }
 
 + (void) delayExcute:(double)delayInSeconds queue:(dispatch_queue_t)queue block:(dispatch_block_t)block {
@@ -87,7 +140,6 @@
         self.contentSize = imageSize;
         self.minSize = imageSize;
         
-        
         [self setMaxMinZoomScale];
         
         // Center containerView by set insets
@@ -100,6 +152,25 @@
             _panRecognizer.delegate = self;
 
             [self.containerView addGestureRecognizer:_panRecognizer];
+
+            /* UIDynamics stuff */
+            _animator = [[UIDynamicAnimator alloc] initWithReferenceView:self.containerView];
+            _animator.delegate = self;
+
+            // snap behavior to keep image view in the center as needed
+            _snapBehavior = [[UISnapBehavior alloc] initWithItem:self.imageView snapToPoint:self.containerView.center];
+            _snapBehavior.damping = 1.0f;
+
+            _pushBehavior = [[UIPushBehavior alloc] initWithItems:@[self.imageView] mode:UIPushBehaviorModeInstantaneous];
+            _pushBehavior.angle = 0.0f;
+            _pushBehavior.magnitude = 0.0f;
+
+            _itemBehavior = [[UIDynamicItemBehavior alloc] initWithItems:@[self.imageView]];
+            _itemBehavior.elasticity = 0.0f;
+            _itemBehavior.friction = 0.2f;
+            _itemBehavior.allowsRotation = YES;
+            _itemBehavior.density = __density;
+            _itemBehavior.resistance = __resistance;
         }
 
         // Setup other events
@@ -134,6 +205,9 @@
 }
 
 - (void) dealloc {
+    if (_animator) {
+        [_animator removeAllBehaviors];
+    }
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -237,7 +311,7 @@
 
 #pragma mark - Gesture Methods
 
-#if 1
+#if 0
 - (void) handlePanGesture:(UIPanGestureRecognizer *)gestureRecognizer {
     NSLog(@"handlePanGesture");
 }
@@ -248,28 +322,28 @@
     CGPoint boxLocation = [gestureRecognizer locationInView:self.imageView];
 
     if (gestureRecognizer.state == UIGestureRecognizerStateBegan) {
-        [self.animator removeBehavior:self.snapBehavior];
-        [self.animator removeBehavior:self.pushBehavior];
+        [_animator removeBehavior:_snapBehavior];
+        [_animator removeBehavior:_pushBehavior];
 
         UIOffset centerOffset = UIOffsetMake(boxLocation.x - CGRectGetMidX(self.imageView.bounds), boxLocation.y - CGRectGetMidY(self.imageView.bounds));
-        self.panAttachmentBehavior = [[UIAttachmentBehavior alloc] initWithItem:self.imageView offsetFromCenter:centerOffset attachedToAnchor:location];
-        //self.panAttachmentBehavior.frequency = 0.0f;
-        [self.animator addBehavior:self.panAttachmentBehavior];
-        [self.animator addBehavior:self.itemBehavior];
+        _panAttachmentBehavior = [[UIAttachmentBehavior alloc] initWithItem:self.imageView offsetFromCenter:centerOffset attachedToAnchor:location];
+        //_panAttachmentBehavior.frequency = 0.0f;
+        [_animator addBehavior:_panAttachmentBehavior];
+        [_animator addBehavior:_itemBehavior];
         [self scaleImageForDynamics];
     }
     else if (gestureRecognizer.state == UIGestureRecognizerStateChanged) {
-        self.panAttachmentBehavior.anchorPoint = location;
+        _panAttachmentBehavior.anchorPoint = location;
     }
     else if (gestureRecognizer.state == UIGestureRecognizerStateEnded) {
-        [self.animator removeBehavior:self.panAttachmentBehavior];
+        [_animator removeBehavior:_panAttachmentBehavior];
 
         // need to scale velocity values to tame down physics on the iPad
         CGFloat deviceVelocityScale = (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) ? 0.2f : 1.0f;
         CGFloat deviceAngularScale = (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) ? 0.7f : 1.0f;
         // factor to increase delay before `dismissAfterPush` is called on iPad to account for more area to cover to disappear
         CGFloat deviceDismissDelay = (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) ? 1.8f : 1.0f;
-        CGPoint velocity = [gestureRecognizer velocityInView:self.view];
+        CGPoint velocity = [gestureRecognizer velocityInView:self.containerView];
         CGFloat velocityAdjust = 10.0f * deviceVelocityScale;
 
         if (fabs(velocity.x / velocityAdjust) > __minimumVelocityRequiredForPush || fabs(velocity.y / velocityAdjust) > __minimumVelocityRequiredForPush) {
@@ -306,10 +380,10 @@
             // adjust angular velocity based on distance from center, force applied farther towards the edges gets more spin
             angularVelocity *= ((xRatioFromCenter + yRatioFromCetner) / 2.0f);
 
-            [self.itemBehavior addAngularVelocity:angularVelocity * __angularVelocityFactor * direction forItem:self.imageView];
-            [self.animator addBehavior:self.pushBehavior];
-            self.pushBehavior.pushDirection = CGVectorMake((velocity.x / velocityAdjust) * __velocityFactor, (velocity.y / velocityAdjust) * __velocityFactor);
-            self.pushBehavior.active = YES;
+            [_itemBehavior addAngularVelocity:angularVelocity * __angularVelocityFactor * direction forItem:self.imageView];
+            [_animator addBehavior:_pushBehavior];
+            _pushBehavior.pushDirection = CGVectorMake((velocity.x / velocityAdjust) * __velocityFactor, (velocity.y / velocityAdjust) * __velocityFactor);
+            _pushBehavior.active = YES;
             
             // delay for dismissing is based on push velocity also
             CGFloat delay = __maximumDismissDelay - (pushVelocity / 10000.0f);
@@ -320,6 +394,50 @@
         }
     }
 }
+
+- (void) returnToCenter {
+    if (_animator) {
+        [_animator removeAllBehaviors];
+    }
+    [UIView animateWithDuration:0.25 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self.imageView.transform = CGAffineTransformIdentity;
+        self.imageView.frame = CGRectMake(0, 0, self.minSize.width, self.minSize.height);
+    } completion:nil];
+}
+
+- (void) hideSnapshotView {
+//    [UIView animateWithDuration:__animationDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+//        self.blurredSnapshotView.alpha = 0.0f;
+//        self.blurredSnapshotView.transform = CGAffineTransformIdentity;
+//        self.snapshotView.transform = CGAffineTransformIdentity;
+//    } completion:^(BOOL finished) {
+//        [_snapshotView removeFromSuperview];
+//        [self.blurredSnapshotView removeFromSuperview];
+//        self.snapshotView = nil;
+//        self.blurredSnapshotView = nil;
+//    }];
+}
+
+- (void) scaleImageForDynamics {
+    _lastZoomScale = self.zoomScale;
+
+    CGRect imageFrame = self.imageView.frame;
+    imageFrame.size.width *= _lastZoomScale;
+    imageFrame.size.height *= _lastZoomScale;
+    self.imageView.frame = imageFrame;
+}
+
+- (void) dismissAfterPush {
+    [self hideSnapshotView];
+    [UIView animateWithDuration:__animationDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self.alpha = 0.0f;
+    } completion:^(BOOL finished) {
+        if (_returnBlock) {
+            _returnBlock();
+        }
+    }];
+}
+
 #endif
 
 #pragma mark - Notification
