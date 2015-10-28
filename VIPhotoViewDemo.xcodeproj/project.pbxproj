@@ -16,7 +16,6 @@
 		A2B8D9C21BE07000007B2F9B /* test.jpg in Resources */ = {isa = PBXBuildFile; fileRef = A2B8D9B61BE07000007B2F9B /* test.jpg */; };
 		A2B8D9C31BE07000007B2F9B /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = A2B8D9B81BE07000007B2F9B /* ViewController.m */; };
 		A2B8D9C41BE07000007B2F9B /* ImageViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = A2B8D9BB1BE07000007B2F9B /* ImageViewController.m */; };
-		A2B8D9C61BE071B6007B2F9B /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A2B8D9C51BE071B6007B2F9B /* Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -133,7 +132,7 @@
 		5F856DF91A5D791C0011786E /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0700;
+				LastUpgradeCheck = 0710;
 				ORGANIZATIONNAME = vito;
 				TargetAttributes = {
 					5F856E001A5D791C0011786E = {
@@ -166,7 +165,6 @@
 			files = (
 				A2B8D9BE1BE07000007B2F9B /* Main.storyboard in Resources */,
 				A2B8D9C21BE07000007B2F9B /* test.jpg in Resources */,
-				A2B8D9C61BE071B6007B2F9B /* Info.plist in Resources */,
 				A2B8D9BF1BE07000007B2F9B /* Images.xcassets in Resources */,
 				A2B8D9BD1BE07000007B2F9B /* LaunchScreen.xib in Resources */,
 				A2B8D9AB1BE06F7F007B2F9B /* Default-568h@2x.png in Resources */,

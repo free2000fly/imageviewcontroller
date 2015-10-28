@@ -4,33 +4,207 @@
 
 #import "ImageViewController.h"
 
-@implementation ImageViewController {
-    __weak VIPhotoView *_photoView;
+@interface UIView (URBMediaFocusViewController)
+- (UIImage *) urb_snapshotImageWithScale:(CGFloat)scale;
+- (void) urb_snapshowImageWithScale:(CGFloat)scale completion:(void (^)(UIImage *snapshotImage))completionBlock;
+@end
+
+@implementation UIView (URBMediaFocusViewController)
+
+- (UIImage *) urb_snapshotImageWithScale:(CGFloat)scale {
+    __strong CALayer *underlyingLayer = self.layer;
+    CGRect bounds = self.bounds;
+
+    CGSize size = bounds.size;
+    if (self.contentMode == UIViewContentModeScaleToFill ||
+        self.contentMode == UIViewContentModeScaleAspectFill ||
+        self.contentMode == UIViewContentModeScaleAspectFit ||
+        self.contentMode == UIViewContentModeRedraw)
+    {
+        // prevents edge artefacts
+        size.width = floorf(size.width * scale) / scale;
+        size.height = floorf(size.height * scale) / scale;
+    }
+    else if ([[UIDevice currentDevice].systemVersion floatValue] < 7.0f && [UIScreen mainScreen].scale == 1.0f) {
+        // prevents pixelation on old devices
+        scale = 1.0f;
+    }
+    UIGraphicsBeginImageContextWithOptions(size, NO, scale);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    CGContextTranslateCTM(context, -bounds.origin.x, -bounds.origin.y);
+
+    [underlyingLayer renderInContext:context];
+    UIImage *snapshot = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+
+    return snapshot;
 }
 
-- (BOOL)prefersStatusBarHidden {
-    return YES;
-}
+- (void) urb_snapshowImageWithScale:(CGFloat)scale completion:(void (^)(UIImage *snapshotImage))completionBlock {
+    if ([self respondsToSelector:@selector(drawViewHierarchyInRect:afterScreenUpdates:)]) {
+        [CATransaction setCompletionBlock:^{
+            UIGraphicsBeginImageContextWithOptions(self.bounds.size, NO, scale);
+            [self drawViewHierarchyInRect:self.bounds afterScreenUpdates:NO];
+            UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+            UIGraphicsEndImageContext();
 
-- (void) setImage:(UIImage *)image {
-    _image = image;
+            if (completionBlock) {
+                completionBlock(image);
+            }
+        }];
+    }
+    else {
+        UIGraphicsBeginImageContextWithOptions(self.bounds.size, NO, scale);
+        [self.layer renderInContext:UIGraphicsGetCurrentContext()];
+        UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
 
-    VIPhotoView *photoView = [[VIPhotoView alloc] initWithFrame:self.view.bounds andImage:image];
-    photoView.autoresizingMask = (1 << 6) -1;
-    photoView.parentController = self;
-
-    self.view = photoView;
-    _photoView = photoView;
-    if (_returnBlock) {
-        _photoView.returnBlock = _returnBlock;
+        if (completionBlock) {
+            completionBlock(image);
+        }
     }
 }
 
-- (void) setReturnBlock:(dispatch_block_t)returnBlock {
-    _returnBlock = returnBlock;
-    if (_photoView) {
-        _photoView.returnBlock = returnBlock;
+@end
+
+
+#import <Accelerate/Accelerate.h>
+#import <QuartzCore/QuartzCore.h>
+#import <AssetsLibrary/AssetsLibrary.h>
+
+@interface UIImage (URBImageEffects)
+- (UIImage *) urb_applyBlurWithRadius:(CGFloat)blurRadius tintColor:(UIColor *)tintColor saturationDeltaFactor:(CGFloat)saturationDeltaFactor maskImage:(UIImage *)maskImage;
+@end
+
+@implementation UIImage (URBImageEffects)
+
+- (UIImage *) urb_applyBlurWithRadius:(CGFloat)blurRadius tintColor:(UIColor *)tintColor saturationDeltaFactor:(CGFloat)saturationDeltaFactor maskImage:(UIImage *)maskImage {
+    // Check pre-conditions.
+    if (self.size.width < 1 || self.size.height < 1) {
+        NSLog (@"*** error: invalid size: (%.2f x %.2f). Both dimensions must be >= 1: %@", self.size.width, self.size.height, self);
+        return nil;
     }
+    if (!self.CGImage) {
+        NSLog (@"*** error: image must be backed by a CGImage: %@", self);
+        return nil;
+    }
+    if (maskImage && !maskImage.CGImage) {
+        NSLog (@"*** error: maskImage must be backed by a CGImage: %@", maskImage);
+        return nil;
+    }
+
+    CGRect imageRect = { CGPointZero, self.size };
+    UIImage *effectImage = self;
+
+    BOOL hasBlur = blurRadius > __FLT_EPSILON__;
+    BOOL hasSaturationChange = fabs(saturationDeltaFactor - 1.) > __FLT_EPSILON__;
+    if (hasBlur || hasSaturationChange) {
+        UIGraphicsBeginImageContextWithOptions(self.size, NO, [[UIScreen mainScreen] scale]);
+        CGContextRef effectInContext = UIGraphicsGetCurrentContext();
+        CGContextScaleCTM(effectInContext, 1.0, -1.0);
+        CGContextTranslateCTM(effectInContext, 0, -self.size.height);
+        CGContextDrawImage(effectInContext, imageRect, self.CGImage);
+
+        vImage_Buffer effectInBuffer;
+        effectInBuffer.data     = CGBitmapContextGetData(effectInContext);
+        effectInBuffer.width    = CGBitmapContextGetWidth(effectInContext);
+        effectInBuffer.height   = CGBitmapContextGetHeight(effectInContext);
+        effectInBuffer.rowBytes = CGBitmapContextGetBytesPerRow(effectInContext);
+
+        UIGraphicsBeginImageContextWithOptions(self.size, NO, [[UIScreen mainScreen] scale]);
+        CGContextRef effectOutContext = UIGraphicsGetCurrentContext();
+        vImage_Buffer effectOutBuffer;
+        effectOutBuffer.data     = CGBitmapContextGetData(effectOutContext);
+        effectOutBuffer.width    = CGBitmapContextGetWidth(effectOutContext);
+        effectOutBuffer.height   = CGBitmapContextGetHeight(effectOutContext);
+        effectOutBuffer.rowBytes = CGBitmapContextGetBytesPerRow(effectOutContext);
+
+        if (hasBlur) {
+            // A description of how to compute the box kernel width from the Gaussian
+            // radius (aka standard deviation) appears in the SVG spec:
+            // http://www.w3.org/TR/SVG/filters.html#feGaussianBlurElement
+            //
+            // For larger values of 's' (s >= 2.0), an approximation can be used: Three
+            // successive box-blurs build a piece-wise quadratic convolution kernel, which
+            // approximates the Gaussian kernel to within roughly 3%.
+            //
+            // let d = floor(s * 3*sqrt(2*pi)/4 + 0.5)
+            //
+            // ... if d is odd, use three box-blurs of size 'd', centered on the output pixel.
+            //
+            CGFloat inputRadius = blurRadius * [[UIScreen mainScreen] scale];
+            float radius = floor(inputRadius * 3. * sqrt(2 * M_PI) / 4 + 0.5);
+            if ((int)radius % 2 != 1) {
+                radius += 1; // force radius to be odd so that the three box-blur methodology works.
+            }
+            vImageBoxConvolve_ARGB8888(&effectInBuffer, &effectOutBuffer, NULL, 0, 0, radius, radius, 0, kvImageEdgeExtend);
+            vImageBoxConvolve_ARGB8888(&effectOutBuffer, &effectInBuffer, NULL, 0, 0, radius, radius, 0, kvImageEdgeExtend);
+            vImageBoxConvolve_ARGB8888(&effectInBuffer, &effectOutBuffer, NULL, 0, 0, radius, radius, 0, kvImageEdgeExtend);
+        }
+        BOOL effectImageBuffersAreSwapped = NO;
+        if (hasSaturationChange) {
+            CGFloat s = saturationDeltaFactor;
+            CGFloat floatingPointSaturationMatrix[] = {
+                0.0722 + 0.9278 * s,  0.0722 - 0.0722 * s,  0.0722 - 0.0722 * s,  0,
+                0.7152 - 0.7152 * s,  0.7152 + 0.2848 * s,  0.7152 - 0.7152 * s,  0,
+                0.2126 - 0.2126 * s,  0.2126 - 0.2126 * s,  0.2126 + 0.7873 * s,  0,
+                0,                    0,                    0,  1,
+            };
+            const int32_t divisor = 256;
+            NSUInteger matrixSize = sizeof(floatingPointSaturationMatrix)/sizeof(floatingPointSaturationMatrix[0]);
+            int16_t saturationMatrix[matrixSize];
+            for (NSUInteger i = 0; i < matrixSize; ++i) {
+                saturationMatrix[i] = (int16_t)roundf(floatingPointSaturationMatrix[i] * divisor);
+            }
+            if (hasBlur) {
+                vImageMatrixMultiply_ARGB8888(&effectOutBuffer, &effectInBuffer, saturationMatrix, divisor, NULL, NULL, kvImageNoFlags);
+                effectImageBuffersAreSwapped = YES;
+            }
+            else {
+                vImageMatrixMultiply_ARGB8888(&effectInBuffer, &effectOutBuffer, saturationMatrix, divisor, NULL, NULL, kvImageNoFlags);
+            }
+        }
+        if (!effectImageBuffersAreSwapped)
+            effectImage = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+
+        if (effectImageBuffersAreSwapped)
+            effectImage = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+    }
+
+    // Set up output context.
+    UIGraphicsBeginImageContextWithOptions(self.size, NO, [[UIScreen mainScreen] scale]);
+    CGContextRef outputContext = UIGraphicsGetCurrentContext();
+    CGContextScaleCTM(outputContext, 1.0, -1.0);
+    CGContextTranslateCTM(outputContext, 0, -self.size.height);
+
+    // Draw base image.
+    CGContextDrawImage(outputContext, imageRect, self.CGImage);
+
+    // Draw effect image.
+    if (hasBlur) {
+        CGContextSaveGState(outputContext);
+        if (maskImage) {
+            CGContextClipToMask(outputContext, imageRect, maskImage.CGImage);
+        }
+        CGContextDrawImage(outputContext, imageRect, effectImage.CGImage);
+        CGContextRestoreGState(outputContext);
+    }
+
+    // Add in color tint.
+    if (tintColor) {
+        CGContextSaveGState(outputContext);
+        CGContextSetFillColorWithColor(outputContext, tintColor.CGColor);
+        CGContextFillRect(outputContext, imageRect);
+        CGContextRestoreGState(outputContext);
+    }
+
+    // Output image is ready.
+    UIImage *outputImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    
+    return outputImage;
 }
 
 @end
@@ -54,6 +228,7 @@
 }
 @end
 
+
 @interface UIImageView (VIUtil)
 - (CGSize)contentSize;
 @end
@@ -65,7 +240,6 @@
 @end
 
 
-static const CGFloat __overlayAlpha = 0.6f;						// opacity of the black overlay displayed below the focused image
 static const CGFloat __animationDuration = 0.18f;				// the base duration for present/dismiss animations (except physics-related ones)
 static const CGFloat __maximumDismissDelay = 0.5f;				// maximum time of delay (in seconds) between when image view is push out and dismissal animations begin
 static const CGFloat __resistance = 0.0f;						// linear resistance applied to the image’s dynamic item behavior
@@ -123,6 +297,7 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
         // Add image view
         UIImageView *imageView = [[UIImageView alloc] initWithImage:image];
         imageView.frame = containerView.bounds;
+        imageView.backgroundColor = [UIColor clearColor];
         imageView.contentMode = UIViewContentModeScaleAspectFit;
         [containerView addSubview:imageView];
         _imageView = imageView;
@@ -191,7 +366,7 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
         CGFloat minZoomScale = imageSize.width / self.minSize.width;
         self.minimumZoomScale = minZoomScale;
         if (containerSmallerThanSelf || self.zoomScale == self.minimumZoomScale) {
-            // 宽度或高度 都小于 self 的宽度和高度
+            // 宽度或高度 都小于 self 的宽度和高度 .
             self.zoomScale = minZoomScale;
         }
 
@@ -309,11 +484,6 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
 
 #pragma mark - Gesture Methods
 
-#if 0
-- (void) handlePanGesture:(UIPanGestureRecognizer *)gestureRecognizer {
-    NSLog(@"handlePanGesture");
-}
-#else
 - (void) handlePanGesture:(UIPanGestureRecognizer *)gestureRecognizer {
     UIView *view = gestureRecognizer.view;
     CGPoint location = [gestureRecognizer locationInView:self.containerView];
@@ -403,19 +573,6 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
     } completion:nil];
 }
 
-- (void) hideSnapshotView {
-//    [UIView animateWithDuration:__animationDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
-//        self.blurredSnapshotView.alpha = 0.0f;
-//        self.blurredSnapshotView.transform = CGAffineTransformIdentity;
-//        self.snapshotView.transform = CGAffineTransformIdentity;
-//    } completion:^(BOOL finished) {
-//        [_snapshotView removeFromSuperview];
-//        [self.blurredSnapshotView removeFromSuperview];
-//        self.snapshotView = nil;
-//        self.blurredSnapshotView = nil;
-//    }];
-}
-
 - (void) scaleImageForDynamics {
     _lastZoomScale = self.zoomScale;
 
@@ -426,55 +583,10 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
 }
 
 - (void) dismissAfterPush {
-    [self hideSnapshotView];
-    [UIView animateWithDuration:__animationDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.alpha = 0.0f;
-    } completion:^(BOOL finished) {
-        if (_returnBlock) {
-            _returnBlock();
-        }
-    }];
+    if (_returnBlock) {
+        _returnBlock();
+    }
 }
-
-//- (void)createViewsForBackground:(void (^)())completionBlock {
-//    // container view for window
-//    CGRect containerFrame = CGRectMake(0, 0, CGRectGetWidth(self.keyWindow.frame), CGRectGetHeight(self.keyWindow.frame));
-//
-//    // inset container view so we can blur the edges, but we also need to scale up so when __backgroundScale is applied, everything lines up
-//    // only perform inset if `parallaxEnabled` is YES
-//        containerFrame.size.width *= 1.0f / __backgroundScale;
-//        containerFrame.size.height *= 1.0f / __backgroundScale;
-//
-//    UIView *containerView = [[UIView alloc] initWithFrame:CGRectIntegral(containerFrame)];
-//    containerView.backgroundColor = [UIColor blackColor];
-//
-//    // add snapshot of window to the container
-//    UIImage *windowSnapshot = [self.keyWindow urb_snapshotImageWithScale:[UIScreen mainScreen].scale];
-//    UIImageView *windowSnapshotView = [[UIImageView alloc] initWithImage:windowSnapshot];
-//    windowSnapshotView.center = containerView.center;
-//    [containerView addSubview:windowSnapshotView];
-//    containerView.center = self.keyWindow.center;
-//
-//    UIImageView *snapshotView;
-//    // only add blurred view if radius is above 0
-//    if (self.shouldBlurBackground && __blurRadius) {
-//        UIImage *snapshot = [containerView urb_snapshotImageWithScale:[UIScreen mainScreen].scale];
-//        snapshot = [snapshot urb_applyBlurWithRadius:__blurRadius
-//                                           tintColor:[UIColor colorWithWhite:0.0f alpha:__blurTintColorAlpha]
-//                               saturationDeltaFactor:__blurSaturationDeltaMask
-//                                           maskImage:nil];
-//        snapshotView = [[UIImageView alloc] initWithImage:snapshot];
-//        snapshotView.center = containerView.center;
-//        snapshotView.alpha = 0.0f;
-//        snapshotView.userInteractionEnabled = NO;
-//    }
-//    
-//    self.snapshotView = containerView;
-//    self.blurredSnapshotView = snapshotView;
-//}
-
-
-#endif
 
 #pragma mark - Notification
 
@@ -507,6 +619,141 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
     left -= frame.origin.x;
 
     self.contentInset = UIEdgeInsetsMake(top, left, top, left);
+}
+
+@end
+
+
+@implementation ImageViewController {
+    VIPhotoView *_photoView;
+
+    __weak UIView *_keyWindow;
+
+    UIImageView *_blurredSnapshotView;
+    UIView *_snapshotView;
+}
+
+- (void) dealloc {
+    // NSLog(@"ImageViewController::dealloc");
+}
+
+- (void) setKeyWindow:(UIView *)keyWindow {
+    _keyWindow = keyWindow;
+    [self createViewsForBackground];
+}
+
+- (void) viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+
+    if ([UIView instancesRespondToSelector:@selector(setTintAdjustmentMode:)]) {
+        _keyWindow.tintAdjustmentMode = UIViewTintAdjustmentModeDimmed;
+        [_keyWindow tintColorDidChange];
+    }
+
+    if (_snapshotView) {
+        [_keyWindow addSubview:_blurredSnapshotView];
+        [_keyWindow insertSubview:_snapshotView belowSubview:_blurredSnapshotView];
+    }
+
+    _photoView.alpha = 0.0f;
+    [_keyWindow addSubview:_photoView];
+
+    [UIView animateWithDuration:__animationDuration delay:0.1 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        if (_snapshotView) {
+            _blurredSnapshotView.alpha = 1.0f;
+            _blurredSnapshotView.transform = CGAffineTransformScale(CGAffineTransformIdentity, __backgroundScale, __backgroundScale);
+            _snapshotView.transform = CGAffineTransformScale(CGAffineTransformIdentity, __backgroundScale, __backgroundScale);
+        }
+    } completion:^(BOOL finished) {
+        _photoView.alpha = 1.0f;
+    }];
+}
+
+- (BOOL) prefersStatusBarHidden {
+    return YES;
+}
+
+- (void) setImage:(UIImage *)image {
+    _image = image;
+
+    CGRect rc = self.view.bounds;
+    VIPhotoView *photoView = [[VIPhotoView alloc] initWithFrame:rc andImage:image];
+    photoView.autoresizingMask = (1 << 6) -1;
+    photoView.parentController = self;
+
+    _photoView = photoView;
+
+    [self setReturnBlock:_returnBlock];
+}
+
+- (void) setReturnBlock:(dispatch_block_t)returnBlock {
+    _returnBlock = returnBlock;
+    if (_photoView) {
+        typeof(self) __weak weakSelf = self;
+        _photoView.returnBlock = ^{
+            typeof(weakSelf) __strong strongSelf = weakSelf;
+
+            [strongSelf hideSnapshotView];
+            [UIView animateWithDuration:__animationDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+                strongSelf->_photoView.alpha = 0.0f;
+            } completion:^(BOOL finished) {
+                [strongSelf->_photoView removeFromSuperview];
+                strongSelf->_photoView = nil;
+                if (returnBlock) {
+                    returnBlock();
+                }
+            }];
+        };
+    }
+}
+
+- (void) createViewsForBackground {
+    // container view for window
+    CGRect containerFrame = CGRectMake(0, 0, CGRectGetWidth(_keyWindow.frame), CGRectGetHeight(_keyWindow.frame));
+
+    // inset container view so we can blur the edges, but we also need to scale up so when __backgroundScale is applied, everything lines up
+    containerFrame.size.width *= 1.0f / __backgroundScale;
+    containerFrame.size.height *= 1.0f / __backgroundScale;
+
+    UIView *tmpSnapshotView = [[UIView alloc] initWithFrame:CGRectIntegral(containerFrame)];
+    tmpSnapshotView.backgroundColor = [UIColor blackColor];
+
+    // add snapshot of window to the container
+    UIImage *windowSnapshot = [_keyWindow urb_snapshotImageWithScale:[UIScreen mainScreen].scale];
+    UIImageView *windowSnapshotView = [[UIImageView alloc] initWithImage:windowSnapshot];
+    windowSnapshotView.center = tmpSnapshotView.center;
+    [tmpSnapshotView addSubview:windowSnapshotView];
+    tmpSnapshotView.center = _keyWindow.center;
+
+    UIImageView *snapshotView;
+    // only add blurred view if radius is above 0
+    if (__blurRadius) {
+        UIImage *snapshot = [tmpSnapshotView urb_snapshotImageWithScale:[UIScreen mainScreen].scale];
+        snapshot = [snapshot urb_applyBlurWithRadius:__blurRadius
+                                           tintColor:[UIColor colorWithWhite:0.0f alpha:__blurTintColorAlpha]
+                               saturationDeltaFactor:__blurSaturationDeltaMask
+                                           maskImage:nil];
+        snapshotView = [[UIImageView alloc] initWithImage:snapshot];
+        snapshotView.center = tmpSnapshotView.center;
+        snapshotView.alpha = 0.0f;
+        snapshotView.userInteractionEnabled = NO;
+    }
+
+    _snapshotView = tmpSnapshotView;
+    _blurredSnapshotView = snapshotView;
+}
+
+- (void) hideSnapshotView {
+    [UIView animateWithDuration:__animationDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        _blurredSnapshotView.alpha = 0.0f;
+        _blurredSnapshotView.transform = CGAffineTransformIdentity;
+        _snapshotView.transform = CGAffineTransformIdentity;
+    } completion:^(BOOL finished) {
+        [_snapshotView removeFromSuperview];
+        [_blurredSnapshotView removeFromSuperview];
+        _snapshotView = nil;
+        _blurredSnapshotView = nil;
+    }];
 }
 
 @end

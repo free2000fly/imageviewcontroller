@@ -11,6 +11,7 @@
 @end
 
 @interface ImageViewController : UIViewController
+@property(nonatomic, weak) UIView *keyWindow;
 @property(nonatomic, strong) UIImage *image;
 @property(nonatomic, strong) dispatch_block_t returnBlock;
 @end
