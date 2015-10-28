@@ -1,5 +1,5 @@
 //
-//  VIPhotoView.h
+//  ImageViewController.h
 //
 
 #import <UIKit/UIKit.h>
@@ -10,7 +10,7 @@
 - (instancetype)initWithFrame:(CGRect)frame andImage:(UIImage *)image;
 @end
 
-@interface ImageController : UIViewController
+@interface ImageViewController : UIViewController
 @property(nonatomic, strong) UIImage *image;
 @property(nonatomic, strong) dispatch_block_t returnBlock;
 @end

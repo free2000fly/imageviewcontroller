@@ -7,7 +7,7 @@
 //
 
 #import "ViewController.h"
-#import "VIPhotoView.h"
+#import "ImageViewController.h"
 
 
 @interface ViewController ()
@@ -26,7 +26,7 @@
 }
 
 - (IBAction) testMethod:(UIButton *)sender {
-    ImageController *imgCtrl = [[ImageController alloc] init];
+    ImageViewController *imgCtrl = [[ImageViewController alloc] init];
     imgCtrl.image = [UIImage imageNamed:@"test.jpg"];
 
     imgCtrl.returnBlock = ^ {

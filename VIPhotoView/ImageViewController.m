@@ -2,9 +2,9 @@
 //  VIPhotoView.m
 //
 
-#import "VIPhotoView.h"
+#import "ImageViewController.h"
 
-@implementation ImageController {
+@implementation ImageViewController {
     __weak VIPhotoView *_photoView;
 }
 
