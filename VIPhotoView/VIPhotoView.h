@@ -1,11 +1,5 @@
 //
 //  VIPhotoView.h
-//  VIPhotoViewDemo
-//
-//  Created by Vito on 1/7/15.
-//  Copyright (c) 2015 vito. All rights reserved.
-//
-// https://github.com/u10int/URBMediaFocusViewController
 //
 
 #import <UIKit/UIKit.h>

@@ -1,9 +1,5 @@
 //
 //  VIPhotoView.m
-//  VIPhotoViewDemo
-//
-//  Created by Vito on 1/7/15.
-//  Copyright (c) 2015 vito. All rights reserved.
 //
 
 #import "VIPhotoView.h"
@@ -258,7 +254,9 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
                                       applicationActivities:nil];
     if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad) {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED > __IPHONE_7_1
+        CGPoint pt = [recognizer locationInView:self];
         avc.popoverPresentationController.sourceView = self;
+        avc.popoverPresentationController.sourceRect = CGRectMake(pt.x, pt.y, 1, 1);
 #endif
     }
 
@@ -437,6 +435,44 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
         }
     }];
 }
+
+//- (void)createViewsForBackground:(void (^)())completionBlock {
+//    // container view for window
+//    CGRect containerFrame = CGRectMake(0, 0, CGRectGetWidth(self.keyWindow.frame), CGRectGetHeight(self.keyWindow.frame));
+//
+//    // inset container view so we can blur the edges, but we also need to scale up so when __backgroundScale is applied, everything lines up
+//    // only perform inset if `parallaxEnabled` is YES
+//        containerFrame.size.width *= 1.0f / __backgroundScale;
+//        containerFrame.size.height *= 1.0f / __backgroundScale;
+//
+//    UIView *containerView = [[UIView alloc] initWithFrame:CGRectIntegral(containerFrame)];
+//    containerView.backgroundColor = [UIColor blackColor];
+//
+//    // add snapshot of window to the container
+//    UIImage *windowSnapshot = [self.keyWindow urb_snapshotImageWithScale:[UIScreen mainScreen].scale];
+//    UIImageView *windowSnapshotView = [[UIImageView alloc] initWithImage:windowSnapshot];
+//    windowSnapshotView.center = containerView.center;
+//    [containerView addSubview:windowSnapshotView];
+//    containerView.center = self.keyWindow.center;
+//
+//    UIImageView *snapshotView;
+//    // only add blurred view if radius is above 0
+//    if (self.shouldBlurBackground && __blurRadius) {
+//        UIImage *snapshot = [containerView urb_snapshotImageWithScale:[UIScreen mainScreen].scale];
+//        snapshot = [snapshot urb_applyBlurWithRadius:__blurRadius
+//                                           tintColor:[UIColor colorWithWhite:0.0f alpha:__blurTintColorAlpha]
+//                               saturationDeltaFactor:__blurSaturationDeltaMask
+//                                           maskImage:nil];
+//        snapshotView = [[UIImageView alloc] initWithImage:snapshot];
+//        snapshotView.center = containerView.center;
+//        snapshotView.alpha = 0.0f;
+//        snapshotView.userInteractionEnabled = NO;
+//    }
+//    
+//    self.snapshotView = containerView;
+//    self.blurredSnapshotView = snapshotView;
+//}
+
 
 #endif
 
