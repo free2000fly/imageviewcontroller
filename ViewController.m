@@ -11,6 +11,7 @@
 
 
 @interface ViewController ()
+@property (weak, nonatomic) IBOutlet UISwitch *declineImage;
 @end
 
 @implementation ViewController
@@ -28,6 +29,7 @@
     ImageViewController *imgCtrl = [[ImageViewController alloc] init];
     imgCtrl.keyWindow = [[UIApplication sharedApplication] keyWindow];
     imgCtrl.image = [UIImage imageNamed:@"test.jpg"];
+    imgCtrl.declineImage = _declineImage.on;
 
     imgCtrl.returnBlock = ^ {
         [self dismissViewControllerAnimated:NO completion:nil];

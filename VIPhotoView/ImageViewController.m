@@ -318,6 +318,8 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
 
         // only add pan gesture and physics stuff if we can (e.g., iOS 7+)
         if (NSClassFromString(@"UIDynamicAnimator")) {
+            _declineImage = YES;
+
             // pan gesture to handle the physics
             _panRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePanGesture:)];
             _panRecognizer.delegate = self;
@@ -494,7 +496,11 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
         [_animator removeBehavior:_pushBehavior];
 
         UIOffset centerOffset = UIOffsetMake(boxLocation.x - CGRectGetMidX(self.imageView.bounds), boxLocation.y - CGRectGetMidY(self.imageView.bounds));
-        _panAttachmentBehavior = [[UIAttachmentBehavior alloc] initWithItem:self.imageView offsetFromCenter:centerOffset attachedToAnchor:location];
+        if (_declineImage) {
+            _panAttachmentBehavior = [[UIAttachmentBehavior alloc] initWithItem:self.imageView offsetFromCenter:centerOffset attachedToAnchor:location];
+        } else {
+            _panAttachmentBehavior = [[UIAttachmentBehavior alloc] initWithItem:self.imageView attachedToAnchor:location];
+        }
         //_panAttachmentBehavior.frequency = 0.0f;
         [_animator addBehavior:_panAttachmentBehavior];
         [_animator addBehavior:_itemBehavior];
@@ -528,6 +534,9 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
 
             // angle (θ) is the angle between the push vector (V) and vector component parallel to radius, so it should always be positive
             CGFloat angle = fabs(fabs(velocityAngle) - fabs(locationAngle));
+            if (!_declineImage) {
+                angle = 0;
+            }
             // angular velocity formula: w = (abs(V) * sin(θ)) / abs(r)
             CGFloat angularVelocity = fabs((fabs(pushVelocity) * sinf(angle)) / fabs(radius));
 
@@ -705,6 +714,14 @@ static const CGFloat __blurTintColorAlpha = 0.2f;				// defines how much to tint
             }];
         };
     }
+}
+
+- (void) setDeclineImage:(BOOL)declineImage {
+    [_photoView setDeclineImage:declineImage];
+}
+
+- (BOOL) declineImage {
+    return [_photoView declineImage];
 }
 
 - (void) createViewsForBackground {
